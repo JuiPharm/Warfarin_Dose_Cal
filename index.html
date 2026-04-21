@@ -38,7 +38,7 @@
     .container { max-width: 1380px; margin: 24px auto 56px; padding: 0 16px; }
     .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px; }
     .brand { display: flex; align-items: flex-start; gap: 14px; }
-    .brand-logo { width: 80px; height: 64px; object-fit: contain; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow); padding: 8px; }
+    .brand-logo { width: 64px; height: 64px; object-fit: contain; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow); padding: 8px; }
     .title { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -.02em; }
     .subtitle { margin: 8px 0 0; color: var(--muted); line-height: 1.6; max-width: 900px; }
     .hero-actions { display: grid; gap: 10px; justify-items: end; }
@@ -192,6 +192,9 @@
             </div>
           </div>
 
+          <div class="subsection-title">Quick adjust by percentage</div>
+          <div class="btn-row" id="quickAdjustButtons"></div>
+
           <div class="subsection-title">Clinical modifiers</div>
           <div class="input-grid">
             <div>
@@ -250,16 +253,16 @@
               <select id="maxUniqueDailyDoses"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select>
             </div>
             <div>
-              <label for="startDay">Week starts on</label>
-              <select id="startDay"><option value="0" selected>Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select>
+              <label for="startDay">Week starts on (auto from Start date)</label>
+              <select id="startDay" disabled><option value="0" selected>Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select>
             </div>
             <div>
               <label for="dispenseMode">Dispense mode</label>
               <select id="dispenseMode"><option value="bulk" selected>รวมซอง</option><option value="split">แยกซองรายวัน</option></select>
             </div>
             <div>
-              <label for="startDate">Start date</label>
-              <input id="startDate" type="date" />
+              <label for="startDate">Start date <span style="color:#dc2626;">*</span></label>
+              <input id="startDate" type="date" required />
             </div>
             <div>
               <label for="daysSupply">Days supply</label>
@@ -271,8 +274,8 @@
             </div>
           </div>
           <div class="btn-row" style="margin-top:12px;">
-            <button id="syncDaysBtn" class="secondary">Sync days from Next Appointment date</button>
-            <button id="applyClinicalSuggestionBtn" class="outline">Apply clinical suggestion</button>
+            <button id="syncDaysBtn" class="secondary">Sync number of days from Next Appointment date</button>
+            <button id="applyClinicalSuggestionBtn" class="outline">Apply clinical suggestion to target dose</button>
           </div>
         </div>
 
@@ -280,12 +283,13 @@
           <h2 class="section-title">INR adjustment guide</h2>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>INR vs goal</th><th>Typical action concept</th></tr></thead>
+              <thead><tr><th>INR range</th><th>Suggested action</th></tr></thead>
               <tbody>
-                <tr><td>Below goal</td><td>Increase weekly dose, assess adherence, diet, missed dose, and consider one-time booster in selected cases</td></tr>
-                <tr><td>Within goal</td><td>Maintain dose and reinforce adherence / monitoring</td></tr>
-                <tr><td>Slightly above goal</td><td>Decrease weekly dose; consider hold 0–1 dose depending on context</td></tr>
-                <tr><td>Markedly above goal or bleeding</td><td>Hold dose and escalate clinical review urgently</td></tr>
+                <tr><td>&lt; 1.5</td><td>Consider increasing weekly doseประมาณ 10–20% และประเมิน adherence</td></tr>
+                <tr><td>1.5–1.9</td><td>Consider increasing weekly doseประมาณ 5–15%</td></tr>
+                <tr><td>2.0–3.0</td><td>Therapeutic range; continue current dose หากไม่มีปัจจัยเปลี่ยนแปลง</td></tr>
+                <tr><td>3.1–3.5</td><td>Consider decreasing weekly doseประมาณ 5–10%</td></tr>
+                <tr><td>&gt; 3.5</td><td>Evaluate bleeding risk, drug interaction, diet; consider hold/reduce per guideline</td></tr>
               </tbody>
             </table>
           </div>
@@ -504,6 +508,7 @@
       splitScheduleHint: document.getElementById('splitScheduleHint'),
       medicationCalendar: document.getElementById('medicationCalendar'),
       exportText: document.getElementById('exportText'),
+      quickAdjustButtons: document.getElementById('quickAdjustButtons'),
     };
 
     function round1(n){ return Math.round(n*10)/10; }
@@ -517,6 +522,28 @@
     function rotateArray(arr, startIndex){ return arr.slice(startIndex).concat(arr.slice(0,startIndex)); }
     function getDayNamesTH(){ return rotateArray(BASE_DAY_NAMES_TH, state.startDay); }
     function getDayNamesEN(){ return rotateArray(BASE_DAY_NAMES_EN, state.startDay); }
+
+    function deriveStartDayFromDate(dateStr){
+      if (!dateStr) return 0;
+      const d = new Date(dateStr + 'T00:00:00');
+      if (Number.isNaN(d.getTime())) return 0;
+      return (d.getDay() + 6) % 7;
+    }
+
+    function syncStartDayFromStartDate(){
+      state.startDay = deriveStartDayFromDate(state.startDate);
+      if (el.startDay) el.startDay.value = String(state.startDay);
+    }
+
+
+    function getEffectiveDaysSupply(){
+      const manual = Math.max(1, Number(state.daysSupply || 1));
+      if (!state.startDate || !state.followUpDate) return manual;
+      const base = new Date(state.startDate + 'T00:00:00');
+      const fup = new Date(state.followUpDate + 'T00:00:00');
+      const diff = Math.ceil((fup - base) / 86400000);
+      return diff >= 1 ? diff : manual;
+    }
 
     function readInputsToState(){
       state.indication = el.indication.value;
@@ -535,6 +562,7 @@
       state.daysSupply = Math.max(1, Number(el.daysSupply.value || 1));
       state.startDate = el.startDate.value || '';
       state.followUpDate = el.followUpDate.value || '';
+      syncStartDayFromStartDate();
     }
 
     function writeStateToInputs(){
@@ -552,6 +580,7 @@
       el.dispenseMode.value = state.dispenseMode;
       el.daysSupply.value = state.daysSupply;
       el.startDate.value = state.startDate;
+      syncStartDayFromStartDate();
       el.followUpDate.value = state.followUpDate;
       document.querySelectorAll('.strength-check').forEach(chk=>{ chk.checked = state.strengths.includes(Number(chk.value)); });
     }
@@ -675,11 +704,37 @@
       return result;
     }
 
+    function renderQuickAdjustButtons(){
+      if (!el.quickAdjustButtons) return;
+      el.quickAdjustButtons.innerHTML = QUICK_PCTS.map(pct => `
+        <button type="button" class="${pct > 0 ? '' : 'secondary'}" data-adjust="${pct}">${pct > 0 ? '+' : ''}${pct}%</button>
+      `).join('');
+      el.quickAdjustButtons.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => applyQuickAdjust(Number(btn.dataset.adjust)));
+      });
+    }
+
+    function applyQuickAdjust(percent){
+      readInputsToState();
+      const base = Number(state.currentWeeklyDose || 0);
+      if (!base) {
+        alert('กรุณากรอก Current weekly dose ก่อน');
+        return;
+      }
+      state.targetWeeklyDose = round1(base * (1 + percent / 100));
+      writeStateToInputs();
+      updateSummaryUI();
+      regenerateDispenseForSelection();
+      renderAllOutputs();
+    }
+
     function applyClinicalSuggestion(){
       readInputsToState();
+      if (!state.startDate) { alert('กรุณาเลือก Start date'); return; }
       const rec = clinicalRuleEngine();
       state.recommendation = rec;
       let newTarget = Number(state.currentWeeklyDose || 0);
+      if (!newTarget) { alert('กรุณากรอก Current weekly dose ก่อน'); return; }
       if (rec.canAutoGenerate) {
         newTarget = round1(state.currentWeeklyDose * (1 + rec.midpointPct/100));
         if (rec.holdDays > 0) {
@@ -691,6 +746,7 @@
       writeStateToInputs();
       updateSummaryUI();
       renderClinicalBox();
+      renderExportText();
     }
 
     function generateDailyDoseOptions(strengths, allowHalfTabs){
@@ -879,13 +935,25 @@
       return { mode, totals: [...totals.entries()].map(([strength, tablets])=>({strength, tablets})), dailyBreakdown };
     }
 
+    function formatCalendarDate(dateObj){
+      return dateObj.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'2-digit' });
+    }
+
     function buildSplitSchedule(selected, daysSupply){
-      const names = getDayNamesEN();
       const rows = [];
+      const baseDate = state.startDate ? new Date(state.startDate + 'T00:00:00') : null;
       for (let i=0;i<daysSupply;i++) {
         const dayIndex = i % 7;
         const detail = selected.dailyDetails[dayIndex];
-        rows.push({ index:i+1, dayLabel:`Day ${i+1}`, weekday:names[dayIndex], dose:detail.dose, tabletSummary:detail.tabletSummary });
+        const d = baseDate ? new Date(baseDate.getTime() + i*86400000) : null;
+        const weekdayIdx = d ? ((d.getDay()+6)%7) : dayIndex;
+        rows.push({
+          index:i+1,
+          dayLabel:d ? formatCalendarDate(d) : `Day ${i+1}`,
+          weekday:BASE_DAY_NAMES_EN[weekdayIdx],
+          dose:detail.dose,
+          tabletSummary:detail.tabletSummary
+        });
       }
       return rows;
     }
@@ -968,13 +1036,32 @@
 
     function renderSplitSchedule(){
       const selected = state.candidateRegimens[state.selectedCandidateIndex];
+      const totalDays = getEffectiveDaysSupply();
       if (!selected) {
         el.splitScheduleBody.innerHTML = '<tr><td colspan="6">-</td></tr>';
         return;
       }
-      const rows = buildSplitSchedule(selected, state.daysSupply);
+      const rows = buildSplitSchedule(selected, totalDays);
       el.splitScheduleBody.innerHTML = rows.map(row=>`<tr><td>${row.index}</td><td>${row.dayLabel}</td><td>${row.weekday}</td><td>${formatMg(row.dose)}</td><td>${renderPillVisual(row.tabletSummary)}</td><td>${tabletSummaryToText(row.tabletSummary)}</td></tr>`).join('');
-      el.splitScheduleHint.textContent = state.dispenseMode === 'split' ? `แสดงรายการแยกซองครบ ${state.daysSupply} วัน` : 'ขณะนี้อยู่ในโหมดรวมซอง แต่ยังแสดงตารางรายวันเพื่อใช้ตรวจสอบ regimen ได้';
+      el.splitScheduleHint.textContent = state.dispenseMode === 'split' ? `แสดงรายการแยกซองครบ ${totalDays} วัน` : 'ขณะนี้อยู่ในโหมดรวมซอง แต่ยังแสดงตารางรายวันเพื่อใช้ตรวจสอบ regimen ได้';
+    }
+
+    function renderMedicationCalendar(){
+      if (!el.medicationCalendar) return;
+      const selected = state.candidateRegimens[state.selectedCandidateIndex];
+      const totalDays = getEffectiveDaysSupply();
+      if (!selected || !state.startDate) {
+        el.medicationCalendar.innerHTML = '<div class="candidate-note">กรุณาเลือก Start date และ Generate recommendation</div>';
+        return;
+      }
+      const rows = buildSplitSchedule(selected, totalDays);
+      el.medicationCalendar.innerHTML = rows.map(row => `
+        <div class="calendar-cell">
+          <div class="calendar-date">${row.dayLabel}</div>
+          <div class="calendar-dose">${row.weekday} • ${formatMg(row.dose)}</div>
+          ${renderPillVisual(row.tabletSummary)}
+          <div class="calendar-note">${tabletSummaryToText(row.tabletSummary)}</div>
+        </div>`).join('');
     }
 
     function renderClinicalBox(){
@@ -1000,14 +1087,18 @@
       const rec = state.recommendation || clinicalRuleEngine();
       const selected = state.candidateRegimens[state.selectedCandidateIndex];
       const doseSummary = calcDoseSummary(state.currentWeeklyDose, state.targetWeeklyDose);
-      const regimenLines = selected ? selected.dailyDetails.map((row,i)=>`- ${getDayNamesEN()[i]}: ${formatMg(row.dose)} (${tabletSummaryToText(row.tabletSummary)})`).join('\n') : '-';
-      const dispenseLines = state.dispense ? state.dispense.totals.map(row=>`- ${row.strength} mg: ${row.tablets} tablets`).join('\n') : '-';
+      const regimenLines = selected ? selected.dailyDetails.map((row,i)=>`- ${getDayNamesEN()[i]}: ${formatMg(row.dose)} (${tabletSummaryToText(row.tabletSummary)})`).join('\n') : '- No regimen generated yet';
+      const dispenseLines = state.dispense ? state.dispense.totals.map(row=>`- ${row.strength} mg: ${row.tablets} tablets`).join('\n') : '- No dispense summary yet';
       return [
         'Warfarin clinical recommendation',
         '',
         `Indication: ${cfg.label}`,
         `Current INR: ${state.currentINR ?? '-'}`,
         `Target INR range: ${rec.targetRangeLabel}`,
+        `Start date: ${state.startDate || '-'}`,
+        `Next Appointment date: ${state.followUpDate || '-'}`,
+        `Week starts on: ${getDayNamesEN()[0]}`,
+        `Effective days supply: ${getEffectiveDaysSupply()}`,
         `Bleeding status: ${state.bleedingStatus}`,
         `Interacting drug change: ${state.interactingDrug}`,
         `Missed doses last 7 days: ${state.missedDose}`,
@@ -1027,14 +1118,29 @@
         'Dispense summary:',
         dispenseLines,
         '',
-        `Clinical note: ${rec.messages.join(' | ')}`,
+        `Clinical note: ${rec.messages.join(' | ') || '-'}`,
+        !selected ? 'Regimen note: ระบบยังไม่ได้สร้าง regimen รายวัน กรุณาตรวจสอบ target weekly dose และเลือก Generate recommendation อีกครั้ง' : null,
         'Reminder: Verify actual indication, target INR, bleeding severity, renal/hepatic status, interacting drugs, diet, alcohol use, and adherence before signing order.'
       ].filter(Boolean).join('\n');
     }
 
     function renderExportText(){
-      state.exportText = buildExportText();
-      el.exportText.value = state.exportText;
+      try {
+        state.exportText = buildExportText();
+      } catch (err) {
+        console.error('renderExportText failed:', err);
+        state.exportText = [
+          'Warfarin clinical recommendation',
+          '',
+          `Indication: ${INDICATION_CONFIG[state.indication]?.label || '-'}`,
+          `Current INR: ${state.currentINR ?? '-'}`,
+          `Current weekly dose: ${state.currentWeeklyDose == null ? '-' : formatMg(state.currentWeeklyDose)}`,
+          `Target weekly dose: ${state.targetWeeklyDose == null ? '-' : formatMg(state.targetWeeklyDose)}`,
+          '',
+          'Clinical note: Unable to render full export text. Please review inputs and try again.'
+        ].join('\n');
+      }
+      if (el.exportText) el.exportText.value = state.exportText || '';
     }
 
     function updateSummaryUI(){
@@ -1058,43 +1164,74 @@
       renderExportText();
     }
 
+    function ensureTargetWeeklyDoseReady(){
+      const current = Number(state.currentWeeklyDose || 0);
+      if (!current) throw new Error('กรุณากรอก Current weekly dose');
+      if (!state.startDate) throw new Error('กรุณาเลือก Start date');
+      if (state.targetWeeklyDose == null || state.targetWeeklyDose === '' || Number.isNaN(Number(state.targetWeeklyDose))) {
+        const rec = state.recommendation || clinicalRuleEngine();
+        state.recommendation = rec;
+        let newTarget = round1(current * (1 + rec.midpointPct / 100));
+        if (rec.holdDays > 0) {
+          const held = (current / 7) * rec.holdDays;
+          newTarget = Math.max(0, round1(newTarget - held));
+        }
+        state.targetWeeklyDose = newTarget;
+        writeStateToInputs();
+      }
+      return Number(state.targetWeeklyDose || 0);
+    }
+
     function generateRecommendation(){
       readInputsToState();
-      if (!state.strengths.length) { alert('กรุณาเลือกอย่างน้อย 1 tablet strength'); return; }
-      const rec = clinicalRuleEngine();
-      state.recommendation = rec;
-      if (!rec.canAutoGenerate) {
+      try {
+        if (!state.startDate) throw new Error('กรุณาเลือก Start date');
+        if (!state.strengths.length) throw new Error('กรุณาเลือกอย่างน้อย 1 tablet strength');
+        state.recommendation = clinicalRuleEngine();
+        const targetDose = ensureTargetWeeklyDoseReady();
+        if (!state.recommendation.canAutoGenerate) {
+          updateSummaryUI();
+          state.candidateRegimens = [];
+          state.dispense = null;
+          renderAllOutputs();
+          renderExportText();
+          return;
+        }
+        const candidates = generateRegimenCandidates(targetDose, state.strengths, state.allowHalfTabs, state.maxUniqueDailyDoses, state.startDay, 3);
+        state.candidateRegimens = candidates || [];
+        state.selectedCandidateIndex = 0;
+        const selected = state.candidateRegimens[state.selectedCandidateIndex];
+        state.dispense = selected ? calculateDispense(selected.dailyDoses, getEffectiveDaysSupply(), state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
         updateSummaryUI();
+        renderAllOutputs();
+        renderExportText();
+      } catch (err) {
+        alert(err.message || 'ไม่สามารถสร้างคำแนะนำได้');
         state.candidateRegimens = [];
         state.dispense = null;
-        renderAllOutputs();
-        return;
+        state.exportText = buildExportText();
+        if (el.exportText) el.exportText.value = state.exportText || '';
       }
-      const candidates = generateRegimenCandidates(state.targetWeeklyDose, state.strengths, state.allowHalfTabs, state.maxUniqueDailyDoses, state.startDay, 3);
-      state.candidateRegimens = candidates;
-      state.selectedCandidateIndex = 0;
-      const selected = state.candidateRegimens[state.selectedCandidateIndex];
-      state.dispense = selected ? calculateDispense(selected.dailyDoses, state.daysSupply, state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
-      updateSummaryUI();
-      renderAllOutputs();
     }
 
     function regenerateDispenseForSelection(){
       const selected = state.candidateRegimens[state.selectedCandidateIndex];
-      state.dispense = selected ? calculateDispense(selected.dailyDoses, state.daysSupply, state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
+      state.dispense = selected ? calculateDispense(selected.dailyDoses, getEffectiveDaysSupply(), state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
     }
 
     function syncDaysFromFollowup(){
       readInputsToState();
-      if (!state.followUpDate) { alert('กรุณาเลือก Follow-up date'); return; }
-      const base = new Date((state.startDate || todayISO()) + 'T00:00:00');
+      if (!state.startDate) { alert('กรุณาเลือก Start date ก่อน'); return; }
+      if (!state.followUpDate) { alert('กรุณาเลือก Next Appointment date'); return; }
+      const base = new Date(state.startDate + 'T00:00:00');
       const fup = new Date(state.followUpDate + 'T00:00:00');
       const days = Math.ceil((fup - base) / (1000*60*60*24));
-      if (days < 1) { alert('Follow-up date ต้องอยู่หลังจากวันนี้'); return; }
+      if (days < 1) { alert('Next Appointment date ต้องอยู่หลัง Start date'); return; }
       state.daysSupply = days;
       writeStateToInputs();
       regenerateDispenseForSelection();
       renderAllOutputs();
+      renderExportText();
     }
 
     async function copyExportText(){
@@ -1144,7 +1281,7 @@
 
     function bindEvents(){
       [el.indication, el.currentINR, el.currentWeeklyDose, el.targetWeeklyDose, el.bleedingStatus, el.interactingDrug, el.missedDose, el.dietChange, el.allowHalfTabs, el.maxUniqueDailyDoses, el.startDay, el.dispenseMode, el.daysSupply, el.startDate, el.followUpDate].forEach(node => {
-        node.addEventListener('input', ()=>{ readInputsToState(); updateSummaryUI(); regenerateDispenseForSelection(); renderAllOutputs(); });
+        node.addEventListener('input', ()=>{ readInputsToState(); if (state.startDate && state.followUpDate) { state.daysSupply = getEffectiveDaysSupply(); writeStateToInputs(); } updateSummaryUI(); regenerateDispenseForSelection(); renderAllOutputs(); });
       });
       document.querySelectorAll('.strength-check').forEach(chk => chk.addEventListener('change', ()=>{ readInputsToState(); updateSummaryUI(); regenerateDispenseForSelection(); renderAllOutputs(); }));
       el.syncDaysBtn.addEventListener('click', syncDaysFromFollowup);
@@ -1159,6 +1296,8 @@
 
     function init(){
       writeStateToInputs();
+      renderExportText();
+      renderQuickAdjustButtons();
       bindEvents();
       updateSummaryUI();
       renderAllOutputs();
