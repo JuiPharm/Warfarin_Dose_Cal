@@ -123,10 +123,10 @@
     .badge.bad { background: #fee2e2; color: #991b1b; }
     .print-only { display: none; }
     .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 10px; }
-    .calendar-cell { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, #fff 0%, #f8fbff 100%); padding: 12px; min-height: 150px; break-inside: avoid; }
-    .calendar-date { font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
-    .calendar-dose { font-size: 22px; font-weight: 900; color: var(--primary-dark); margin-bottom: 8px; }
-    .calendar-note { font-size: 11px; color: #334155; line-height: 1.45; margin-top: 8px; }
+    .calendar-cell { border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, #fff 0%, #f8fbff 100%); padding: 12px; min-height: 150px; break-inside: avoid; overflow-wrap: anywhere; }
+    .calendar-date { font-size: clamp(12px, .86vw, 14px); font-weight: 800; color: var(--muted); margin-bottom: 6px; line-height: 1.3; }
+    .calendar-dose { font-size: clamp(15px, 1.35vw, 20px); font-weight: 900; color: var(--primary-dark); margin-bottom: 8px; line-height: 1.25; }
+    .calendar-note { font-size: clamp(11px, .8vw, 13px); color: #334155; line-height: 1.5; margin-top: 8px; }
     @media (max-width: 1200px) {
       .layout { grid-template-columns: 1fr; }
       .stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -137,6 +137,18 @@
       .hero-actions, .action-primary, .action-secondary { justify-items: start; justify-content: flex-start; }
       .input-grid, .input-grid-3, .stats { grid-template-columns: 1fr; }
       .title { font-size: 26px; }
+      .calendar-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+      .calendar-cell { min-height: 132px; padding: 11px; }
+      .calendar-date { font-size: 13px; }
+      .calendar-dose { font-size: 18px; }
+      .calendar-note { font-size: 12px; }
+    }
+    @media (max-width: 430px) {
+      .calendar-grid { grid-template-columns: 1fr; }
+      .calendar-cell { min-height: auto; }
+      .calendar-date { font-size: 13px; }
+      .calendar-dose { font-size: 19px; }
+      .calendar-note { font-size: 12px; }
     }
     @media print {
       body { background: #fff; font-size: 12px; }
@@ -145,7 +157,10 @@
       .card { box-shadow: none; border: 1px solid #d1d5db; break-inside: avoid; margin-bottom: 12px; }
       .table-wrap { overflow: visible; }
       .calendar-grid { grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; page-break-inside: avoid; }
-      .calendar-cell { min-height: 120px; }
+      .calendar-cell { min-height: 120px; padding: 8px; }
+      .calendar-date { font-size: 10px; }
+      .calendar-dose { font-size: 14px; }
+      .calendar-note { font-size: 9px; line-height: 1.35; }
       .print-only { display: block; }
     }
   
