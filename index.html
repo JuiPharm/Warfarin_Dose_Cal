@@ -1391,7 +1391,13 @@
         state.candidateRegimens = candidates || [];
         state.selectedCandidateIndex = 0;
         const selected = state.candidateRegimens[state.selectedCandidateIndex];
-        state.dispense = selected ? calculateDispense(selected.dailyDoses, getEffectiveDaysSupply(), state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
+        state.dispense = selected
+          ? calculateDispenseFromSelectedPlan(
+              selected,
+              getEffectiveDaysSupply(),
+              state.dispenseMode
+            )
+          : null;
         updateSummaryUI();
         renderAllOutputs();
         renderExportText();
@@ -1402,6 +1408,36 @@
         state.exportText = buildExportText();
         if (el.exportText) el.exportText.value = state.exportText || '';
       }
+    }
+
+
+    function calculateDispense(regimenOrSelected, daysSupply, strengths, allowHalfTabs, mode){
+      /*
+       * Backward-compatible adapter.
+       * Preferred input is the selected candidate object because it preserves
+       * the exact tablet plan selected by the user.
+       */
+      if (
+        regimenOrSelected &&
+        Array.isArray(regimenOrSelected.dailyDetails)
+      ) {
+        return calculateDispenseFromSelectedPlan(
+          regimenOrSelected,
+          daysSupply,
+          mode || state.dispenseMode
+        );
+      }
+
+      const selected = state.candidateRegimens[state.selectedCandidateIndex];
+      if (selected && Array.isArray(selected.dailyDetails)) {
+        return calculateDispenseFromSelectedPlan(
+          selected,
+          daysSupply,
+          mode || state.dispenseMode
+        );
+      }
+
+      return null;
     }
 
     function regenerateDispenseForSelection(){
