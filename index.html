@@ -175,6 +175,12 @@
     .complexity-moderate{background:#fff4d6;color:#8a5b00}
     .complexity-high{background:#ffe8e6;color:#a2271e}
 
+  
+    .language-switcher { display:flex; align-items:center; gap:5px; margin-left:auto; padding:4px; border:1px solid rgba(255,255,255,.38); border-radius:999px; background:rgba(255,255,255,.12); flex-shrink:0; }
+    .language-switcher button { min-width:44px; padding:7px 10px; border:0; border-radius:999px; background:transparent; color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
+    .language-switcher button.active { background:#fff; color:var(--primary-dark); box-shadow:0 1px 4px rgba(15,23,42,.18); }
+    @media (max-width:760px) { .hero .brand { align-items:flex-start; flex-wrap:wrap; } .language-switcher { margin-left:0; } }
+
   </style>
 </head>
 <body>
@@ -1020,17 +1026,55 @@
       return unique;
     }
 
-    function calculateDispense(regimenDailyDoses, daysSupply, strengths, allowHalfTabs, mode){
+    function calculateDispenseFromSelectedPlan(selected, daysSupply, mode){
+      if (!selected || !Array.isArray(selected.dailyDetails) || selected.dailyDetails.length !== 7) return null;
+
       const totals = new Map();
-      strengths.forEach(s=>totals.set(s,0));
       const dailyBreakdown = [];
-      for (let i=0;i<daysSupply;i++) {
-        const dose = regimenDailyDoses[i%7];
-        const summary = decomposeDoseToTablets(dose, strengths, allowHalfTabs);
+      let totalTabletUnits = 0;
+      let halfTabletUnits = 0;
+
+      for (let i = 0; i < daysSupply; i++) {
+        const planDay = selected.dailyDetails[i % 7];
+        const summary = Array.isArray(planDay.tabletSummary)
+          ? planDay.tabletSummary.map(row => ({
+              strength: Number(row.strength),
+              tablets: Number(row.tablets)
+            }))
+          : [];
+
         dailyBreakdown.push(summary);
-        if (summary) for (const row of summary) totals.set(row.strength, round2((totals.get(row.strength)||0)+row.tablets));
+
+        for (const row of summary) {
+          if (!Number.isFinite(row.strength) || !Number.isFinite(row.tablets) || row.tablets <= 0) continue;
+
+          totals.set(
+            row.strength,
+            round2((totals.get(row.strength) || 0) + row.tablets)
+          );
+
+          totalTabletUnits = round2(totalTabletUnits + row.tablets);
+
+          const fractionalPart = round2(row.tablets - Math.floor(row.tablets));
+          if (fractionalPart > 0.001) {
+            halfTabletUnits = round2(halfTabletUnits + fractionalPart);
+          }
+        }
       }
-      return { mode, totals: [...totals.entries()].map(([strength, tablets])=>({strength, tablets})), dailyBreakdown };
+
+      return {
+        mode,
+        sourceCandidateIndex: state.selectedCandidateIndex,
+        selectedWeeklyDose: selected.total,
+        daysSupply,
+        totals: [...totals.entries()]
+          .map(([strength, tablets]) => ({ strength, tablets }))
+          .filter(row => row.tablets > 0)
+          .sort((a, b) => a.strength - b.strength),
+        dailyBreakdown,
+        totalTabletUnits,
+        halfTabletUnits
+      };
     }
 
     function formatCalendarDate(dateObj){
@@ -1087,7 +1131,9 @@
       [...el.candidateTableBody.querySelectorAll('tr[data-candidate]')].forEach(tr=>{
         tr.addEventListener('click', ()=>{
           state.selectedCandidateIndex = Number(tr.dataset.candidate);
+          regenerateDispenseForSelection();
           renderAllOutputs();
+          renderExportText();
         });
       });
     }
@@ -1117,13 +1163,53 @@
 
     function renderDispenseSummary(){
       const selected = state.candidateRegimens[state.selectedCandidateIndex];
-      if (!selected || !state.dispense) {
+      const dispense = state.dispense;
+
+      if (
+        !selected ||
+        !dispense ||
+        dispense.sourceCandidateIndex !== state.selectedCandidateIndex
+      ) {
         el.dispenseTableBody.innerHTML = '<tr><td colspan="3">-</td></tr>';
-        el.dispenseHint.textContent = 'ยังไม่ได้คำนวณ';
+        el.dispenseHint.textContent = 'ยังไม่ได้เลือก Plan หรือยังไม่ได้คำนวณ';
         return;
       }
-      el.dispenseTableBody.innerHTML = state.dispense.totals.map(row=>`<tr><td>${row.strength} mg</td><td>${row.tablets}</td><td>${Math.abs(row.tablets - Math.round(row.tablets)) > 0 ? 'มีครึ่งเม็ด' : 'เต็มเม็ดทั้งหมด'}</td></tr>`).join('');
-      el.dispenseHint.textContent = state.dispense.mode === 'bulk' ? 'แสดงจำนวนเม็ดรวมทั้งหมดตามจำนวนวันที่จ่าย' : 'โหมดแยกซองรายวัน: ดูรายละเอียดรายวันในตารางด้านล่าง';
+
+      if (!dispense.totals.length) {
+        el.dispenseTableBody.innerHTML =
+          '<tr><td colspan="3">Plan ที่เลือกไม่มีจำนวนเม็ดยาสำหรับจ่าย</td></tr>';
+      } else {
+        el.dispenseTableBody.innerHTML = dispense.totals.map(row => {
+          const whole = Math.floor(row.tablets + 1e-9);
+          const fraction = round2(row.tablets - whole);
+          let remark = 'เต็มเม็ดทั้งหมด';
+
+          if (fraction > 0.001) {
+            remark = Math.abs(fraction - 0.5) < 0.001
+              ? `${whole} เม็ดเต็ม + ½ เม็ด`
+              : `รวม ${row.tablets} เม็ด`;
+          }
+
+          return `<tr>
+            <td>${row.strength} mg</td>
+            <td>${row.tablets}</td>
+            <td>${remark}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      const planNumber = state.selectedCandidateIndex + 1;
+      const modeText = dispense.mode === 'bulk'
+        ? 'รวมจำนวนเม็ดสำหรับจ่าย'
+        : 'คำนวณจากแผนแยกซองรายวัน';
+
+      el.dispenseHint.textContent =
+        `Plan ${planNumber}: ${round1(selected.total)} mg/week | ` +
+        `${dispense.daysSupply} วัน | ${modeText} | ` +
+        `รวม ${round2(dispense.totalTabletUnits)} tablet unit(s)` +
+        (dispense.halfTabletUnits > 0
+          ? ` | มีส่วนครึ่งเม็ดรวม ${round2(dispense.halfTabletUnits)}`
+          : '');
     }
 
     function renderWeeklyDispenseTable(){
@@ -1320,7 +1406,13 @@
 
     function regenerateDispenseForSelection(){
       const selected = state.candidateRegimens[state.selectedCandidateIndex];
-      state.dispense = selected ? calculateDispense(selected.dailyDoses, getEffectiveDaysSupply(), state.strengths, state.allowHalfTabs, state.dispenseMode) : null;
+      state.dispense = selected
+        ? calculateDispenseFromSelectedPlan(
+            selected,
+            getEffectiveDaysSupply(),
+            state.dispenseMode
+          )
+        : null;
     }
 
     function syncDaysFromFollowup(){
@@ -1409,5 +1501,130 @@
     }
     init();
   </script>
+
+<script>
+(function(){
+  'use strict';
+  const translations = {"Warfarin Dose Calculator": ["เครื่องคำนวณขนาดยา Warfarin", "Warfarin Dose Calculator"], "Dose & Regimen": ["ขนาดยาและตารางยา", "Dose & Regimen"], "Clinical setup": ["ข้อมูลทางคลินิก", "Clinical setup"], "Indication": ["ข้อบ่งใช้", "Indication"], "Atrial fibrillation / VTE prophylaxis (INR 2.0–3.0)": ["Atrial fibrillation / การป้องกัน VTE (INR 2.0–3.0)", "Atrial fibrillation / VTE prophylaxis (INR 2.0–3.0)"], "VTE treatment (INR 2.0–3.0)": ["การรักษา VTE (INR 2.0–3.0)", "VTE treatment (INR 2.0–3.0)"], "Mechanical AVR (INR 2.0–3.0)": ["ลิ้นหัวใจเอออร์ติกชนิดโลหะ (INR 2.0–3.0)", "Mechanical AVR (INR 2.0–3.0)"], "Mechanical MVR / high-risk valve (INR 2.5–3.5)": ["ลิ้นหัวใจไมทรัลชนิดโลหะ / ลิ้นหัวใจความเสี่ยงสูง (INR 2.5–3.5)", "Mechanical MVR / high-risk valve (INR 2.5–3.5)"], "Other indication (INR 2.0–3.0)": ["ข้อบ่งใช้อื่น (INR 2.0–3.0)", "Other indication (INR 2.0–3.0)"], "Other indication (INR 2.5–3.5)": ["ข้อบ่งใช้อื่น (INR 2.5–3.5)", "Other indication (INR 2.5–3.5)"], "Current INR": ["ค่า INR ปัจจุบัน", "Current INR"], "Current weekly dose (mg/week)": ["ขนาดยาปัจจุบัน (mg/สัปดาห์)", "Current weekly dose (mg/week)"], "Target weekly dose (mg/week)": ["ขนาดยาเป้าหมาย (mg/สัปดาห์)", "Target weekly dose (mg/week)"], "Quick adjust by percentage": ["ปรับขนาดยาด่วนตามร้อยละ", "Quick adjust by percentage"], "Clinical modifiers": ["ปัจจัยทางคลินิกที่มีผล", "Clinical modifiers"], "Bleeding status": ["ภาวะเลือดออก", "Bleeding status"], "No bleeding": ["ไม่มีเลือดออก", "No bleeding"], "Minor bleeding / nuisance bleeding": ["เลือดออกเล็กน้อย", "Minor bleeding / nuisance bleeding"], "Major bleeding / urgent concern": ["เลือดออกรุนแรง / ภาวะเร่งด่วน", "Major bleeding / urgent concern"], "Interacting drug change": ["การเปลี่ยนแปลงยาที่มีปฏิกิริยากับ warfarin", "Interacting drug change"], "None": ["ไม่มี", "None"], "Started drug that may increase INR": ["เริ่มยาที่อาจเพิ่ม INR", "Started drug that may increase INR"], "Started drug that may decrease INR": ["เริ่มยาที่อาจลด INR", "Started drug that may decrease INR"], "Stopped drug that used to increase INR": ["หยุดยาที่เคยเพิ่ม INR", "Stopped drug that used to increase INR"], "Stopped drug that used to decrease INR": ["หยุดยาที่เคยลด INR", "Stopped drug that used to decrease INR"], "Missed doses in last 7 days": ["จำนวนครั้งที่ลืมยาใน 7 วันที่ผ่านมา", "Missed doses in last 7 days"], "0 dose": ["ไม่ลืมยา", "0 dose"], "1 dose": ["1 ครั้ง", "1 dose"], "2 doses": ["2 ครั้ง", "2 doses"], "≥3 doses": ["ตั้งแต่ 3 ครั้งขึ้นไป", "≥3 doses"], "Diet / alcohol / acute illness": ["อาหาร / แอลกอฮอล์ / การเจ็บป่วยเฉียบพลัน", "Diet / alcohol / acute illness"], "No major change": ["ไม่มีการเปลี่ยนแปลงสำคัญ", "No major change"], "High vitamin K intake": ["รับประทานวิตามิน K สูงขึ้น", "High vitamin K intake"], "Poor intake / diarrhea / acute illness": ["รับประทานอาหารได้น้อย / ท้องเสีย / เจ็บป่วยเฉียบพลัน", "Poor intake / diarrhea / acute illness"], "Alcohol increase / unstable intake": ["ดื่มแอลกอฮอล์เพิ่มขึ้น / ปริมาณไม่สม่ำเสมอ", "Alcohol increase / unstable intake"], "Tablet strengths in hospital": ["ขนาดเม็ดยาที่มีในโรงพยาบาล", "Tablet strengths in hospital"], "Regimen options": ["ตัวเลือกการจัดตารางยา", "Regimen options"], "Allow half tablet": ["อนุญาตให้แบ่งครึ่งเม็ด", "Allow half tablet"], "Yes": ["ใช่", "Yes"], "No": ["ไม่", "No"], "Max unique daily doses": ["จำนวนรูปแบบขนาดยารายวันสูงสุด", "Max unique daily doses"], "Week starts on (auto from Start date)": ["วันเริ่มต้นสัปดาห์ (กำหนดจากวันที่เริ่ม)", "Week starts on (auto from Start date)"], "Monday": ["วันจันทร์", "Monday"], "Tuesday": ["วันอังคาร", "Tuesday"], "Wednesday": ["วันพุธ", "Wednesday"], "Thursday": ["วันพฤหัสบดี", "Thursday"], "Friday": ["วันศุกร์", "Friday"], "Saturday": ["วันเสาร์", "Saturday"], "Sunday": ["วันอาทิตย์", "Sunday"], "Dispense mode": ["รูปแบบการจ่ายยา", "Dispense mode"], "รวมซอง": ["รวมซอง", "Combined packaging"], "แยกซองรายวัน": ["แยกซองรายวัน", "Daily unit-dose packets"], "Start date": ["วันที่เริ่มยา", "Start date"], "Days supply": ["จำนวนวันที่จ่ายยา", "Days supply"], "Next Appointment date": ["วันนัดครั้งถัดไป", "Next appointment date"], "Sync number of days from Next Appointment date": ["คำนวณจำนวนวันจากวันนัดครั้งถัดไป", "Sync days from next appointment"], "Apply clinical suggestion to target dose": ["ใช้คำแนะนำทางคลินิกเป็นขนาดยาเป้าหมาย", "Apply clinical suggestion to target dose"], "INR adjustment guide": ["แนวทางการปรับยาตาม INR", "INR adjustment guide"], "INR range": ["ช่วง INR", "INR range"], "Suggested action": ["คำแนะนำ", "Suggested action"], "Summary": ["สรุป", "Summary"], "Actual change": ["การเปลี่ยนแปลงจริง", "Actual change"], "Weekly delta": ["ผลต่างรายสัปดาห์", "Weekly difference"], "Current daily avg": ["ค่าเฉลี่ยต่อวันปัจจุบัน", "Current daily average"], "Target daily avg": ["ค่าเฉลี่ยต่อวันเป้าหมาย", "Target daily average"], "Generate recommendation": ["สร้างคำแนะนำ", "Generate recommendation"], "Reset": ["ล้างข้อมูล", "Reset"], "Regimen candidates": ["ตัวเลือกตารางยา", "Regimen candidates"], "เลือก": ["เลือก", "Select"], "Selected regimen details": ["รายละเอียดตารางยาที่เลือก", "Selected regimen details"], "Generated total": ["ขนาดยารวมที่สร้างได้", "Generated total"], "Difference from target": ["ผลต่างจากเป้าหมาย", "Difference from target"], "Unique daily doses": ["จำนวนรูปแบบขนาดยารายวัน", "Unique daily doses"], "Half-tablet usage": ["การใช้ครึ่งเม็ด", "Half-tablet usage"], "Pattern score": ["คะแนนความซับซ้อน", "Complexity score"], "Selected regimen note": ["หมายเหตุตารางยาที่เลือก", "Selected regimen note"], "Dispense summary": ["สรุปการจ่ายยา", "Dispense summary"], "Strength": ["ขนาดเม็ด", "Strength"], "Quantity": ["จำนวน", "Quantity"], "Remark": ["หมายเหตุ", "Remark"], "Dispense schedule (Monday–Sunday)": ["ตารางการจ่ายยา (จันทร์–อาทิตย์)", "Dispense schedule (Monday–Sunday)"], "Day": ["วัน", "Day"], "Dose": ["ขนาดยา", "Dose"], "Tablet visual": ["ภาพเม็ดยา", "Tablet visual"], "Tablet plan": ["วิธีจัดเม็ดยา", "Tablet plan"], "Packet label": ["ฉลากซองยา", "Packet label"], "Split-packet daily schedule": ["ตารางแยกซองรายวัน", "Split-packet daily schedule"], "Day index": ["ลำดับวัน", "Day index"], "Weekday": ["วันในสัปดาห์", "Weekday"], "Packet instruction": ["คำแนะนำบนซองยา", "Packet instruction"], "Medication calendar": ["ปฏิทินการรับประทานยา", "Medication calendar"], "Export text for physician / pharmacist": ["ข้อความส่งต่อสำหรับแพทย์ / เภสัชกร", "Export text for physician / pharmacist"], "ข้อความพร้อมใช้งานต่อ": ["ข้อความพร้อมใช้งานต่อ", "Ready-to-use text"], "Copy export text": ["คัดลอกข้อความ", "Copy export text"], "Print": ["พิมพ์", "Print"], "Download HTML file": ["ดาวน์โหลดไฟล์ HTML", "Download HTML file"], "Printed note": ["หมายเหตุสำหรับเอกสารพิมพ์", "Printed note"], "%TTR Calculator — Rosendaal method": ["เครื่องคำนวณ %TTR — วิธี Rosendaal", "%TTR Calculator — Rosendaal method"], "Target INR minimum": ["ค่า INR เป้าหมายต่ำสุด", "Target INR minimum"], "Target INR maximum": ["ค่า INR เป้าหมายสูงสุด", "Target INR maximum"], "ใช้ target จาก Dose tab": ["ใช้ค่าเป้าหมายจากแท็บขนาดยา", "Use target from Dose tab"], "+ เพิ่มผล INR": ["+ เพิ่มผล INR", "+ Add INR result"], "คำนวณ %TTR": ["คำนวณ %TTR", "Calculate %TTR"], "ล้างข้อมูล": ["ล้างข้อมูล", "Clear data"], "INR history": ["ประวัติ INR", "INR history"], "Date": ["วันที่", "Date"], "INR": ["INR", "INR"], "Include": ["นำมาคำนวณ", "Include"], "Action": ["การดำเนินการ", "Action"], "%TTR result": ["ผลการคำนวณ %TTR", "%TTR result"], "Time in range": ["เวลาในช่วงเป้าหมาย", "Time in range"], "Below range": ["ต่ำกว่าช่วงเป้าหมาย", "Below range"], "Above range": ["สูงกว่าช่วงเป้าหมาย", "Above range"], "Evaluated days": ["จำนวนวันที่ประเมิน", "Evaluated days"], "Measurements used": ["จำนวนผลตรวจที่ใช้", "Measurements used"], "Evaluation period": ["ช่วงเวลาที่ประเมิน", "Evaluation period"], "Median INR-test interval": ["ค่ามัธยฐานช่วงห่างการตรวจ INR", "Median INR-test interval"], "Longest INR-test interval": ["ช่วงห่างการตรวจ INR ที่นานที่สุด", "Longest INR-test interval"], "จันทร์": ["จันทร์", "Mon"], "อังคาร": ["อังคาร", "Tue"], "พุธ": ["พุธ", "Wed"], "พฤหัส": ["พฤหัส", "Thu"], "ศุกร์": ["ศุกร์", "Fri"], "เสาร์": ["เสาร์", "Sat"], "อาทิตย์": ["อาทิตย์", "Sun"], "ยังไม่ได้คำนวณ": ["ยังไม่ได้คำนวณ", "Not calculated"], "กด Generate recommendation เพื่อให้ระบบสรุปคำแนะนำเชิงคลินิก": ["กด “สร้างคำแนะนำ” เพื่อให้ระบบสรุปคำแนะนำทางคลินิก", "Click “Generate recommendation” to create the clinical summary."], "แสดงรายการแยกซองครบตามจำนวนวันที่จ่าย": ["แสดงรายการแยกซองครบตามจำนวนวันที่จ่าย", "Shows each daily packet for the complete days supplied."], "สามารถพิมพ์ medication calendar ได้จากปุ่ม Print โดยระบบจะแสดงวัน, ขนาดยา และรูปเม็ดยาเต็มเม็ด/ครึ่งเม็ดตามแต่ละวัน": ["สามารถพิมพ์ปฏิทินการใช้ยาได้จากปุ่มพิมพ์ โดยแสดงวัน ขนาดยา และภาพเม็ดยาเต็มเม็ด/ครึ่งเม็ด", "Print the medication calendar to show each date, dose, and whole/half-tablet visual."], "คำนวณ Time in Therapeutic Range ด้วย linear interpolation ระหว่างผล INR แต่ละครั้ง แยกจาก dose calculation เดิม": ["คำนวณ Time in Therapeutic Range ด้วยการประมาณค่าเชิงเส้นระหว่างผล INR แต่ละครั้ง โดยแยกจากการคำนวณขนาดยา", "Calculates Time in Therapeutic Range using linear interpolation between INR measurements, separately from dose calculation."], "ต้องมีผล INR ที่ใช้คำนวณอย่างน้อย 2 ครั้ง วันที่ซ้ำจะถูกแจ้งเตือนและไม่นำไปคำนวณจนกว่าจะแก้ไข": ["ต้องมีผล INR อย่างน้อย 2 ครั้ง วันที่ซ้ำจะถูกแจ้งเตือนและไม่นำมาคำนวณจนกว่าจะแก้ไข", "At least two included INR results are required. Duplicate dates are flagged and excluded until corrected."], "Prototype นี้เป็น clinical decision support draft ไม่ใช่คำสั่งใช้ยาสำเร็จรูป ควรให้แพทย์/เภสัชกรยืนยันทุกราย": ["ต้นแบบนี้เป็นระบบช่วยตัดสินใจทางคลินิก ไม่ใช่คำสั่งใช้ยาสำเร็จรูป ต้องให้แพทย์หรือเภสัชกรยืนยันทุกครั้ง", "This prototype is clinical decision support, not a final prescription. Every recommendation requires physician or pharmacist verification."], "Prototype นี้สร้างเพื่อใช้เป็นจุดเริ่มต้นสำหรับ GitHub Pages และต้องตรวจสอบความเหมาะสมทางคลินิกก่อนใช้จริง": ["ต้นแบบนี้จัดทำสำหรับ GitHub Pages และต้องผ่านการตรวจสอบความเหมาะสมทางคลินิกก่อนใช้งานจริง", "This prototype is intended for GitHub Pages and requires clinical validation before real-world use."]};
+  const phrasePairs = [["เม็ด", "tablet"], ["ครึ่งเม็ด", "half tablet"], ["วัน", "day"], ["สัปดาห์", "week"], ["ขนาดยา", "dose"], ["รวม", "total"], ["คำเตือน", "Warning"], ["รูปแบบง่าย", "Low complexity"], ["รูปแบบปานกลาง", "Moderate complexity"], ["รูปแบบซับซ้อน", "High complexity"], ["ยังไม่ได้เลือก regimen", "No regimen selected"], ["ยังไม่ได้คำนวณ", "Not calculated"], ["กด Generate recommendation เพื่อสร้างข้อความ", "Click Generate recommendation to create text"]];
+  let currentLang = localStorage.getItem('warfarinLanguage') || 'th';
+  const originalTexts = new WeakMap();
+
+  function normalized(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function translateExact(text, lang) {
+    const key = normalized(text);
+    if (translations[key]) return translations[key][lang === 'th' ? 0 : 1];
+    return text;
+  }
+
+  function translateDynamic(text, lang) {
+    const exact = translateExact(text, lang);
+    if (exact !== text) return exact;
+    if (lang === 'en') {
+      let result = text;
+      phrasePairs.forEach(([th,en]) => { result = result.split(th).join(en); });
+      return result;
+    }
+    return text;
+  }
+
+  function translateTextNode(node, lang) {
+    const raw = node.nodeValue;
+    if (!raw || !normalized(raw)) return;
+    if (!originalTexts.has(node)) originalTexts.set(node, raw);
+    const original = originalTexts.get(node);
+    const lead = original.match(/^\s*/)?.[0] || '';
+    const trail = original.match(/\s*$/)?.[0] || '';
+    node.nodeValue = lead + translateDynamic(normalized(original), lang) + trail;
+  }
+
+  function translateAttributes(root, lang) {
+    root.querySelectorAll?.('[placeholder],[title],[aria-label]').forEach(el => {
+      ['placeholder','title','aria-label'].forEach(attr => {
+        if (!el.hasAttribute(attr)) return;
+        const dataKey = 'i18nOriginal' + attr.replace(/-([a-z])/g, (_,c)=>c.toUpperCase()).replace(/^./,c=>c.toUpperCase());
+        if (!el.dataset[dataKey]) el.dataset[dataKey] = el.getAttribute(attr);
+        el.setAttribute(attr, translateDynamic(el.dataset[dataKey], lang));
+      });
+    });
+  }
+
+  function walkAndTranslate(root, lang) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const p = node.parentElement;
+        if (!p || ['SCRIPT','STYLE','TEXTAREA'].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+        if (p.closest('.language-switcher')) return NodeFilter.FILTER_REJECT;
+        return normalized(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(n => translateTextNode(n, lang));
+    translateAttributes(root, lang);
+  }
+
+  function updateLanguageButtons(lang) {
+    document.querySelectorAll('.language-switcher button').forEach(btn => {
+      const active = btn.dataset.lang === lang;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+  }
+
+  function setLanguage(lang) {
+    currentLang = lang === 'en' ? 'en' : 'th';
+    localStorage.setItem('warfarinLanguage', currentLang);
+    document.documentElement.lang = currentLang;
+    document.title = currentLang === 'th'
+      ? 'เครื่องคำนวณขนาดยา Warfarin - ต้นแบบทางคลินิก'
+      : 'Warfarin Dose Calculator - Clinical Prototype';
+    walkAndTranslate(document.body, currentLang);
+    updateLanguageButtons(currentLang);
+  }
+
+  function createSwitcher() {
+    if (document.querySelector('.language-switcher')) return;
+    const heroBrand = document.querySelector('.hero .brand');
+    if (!heroBrand) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'language-switcher no-print';
+    wrap.setAttribute('role','group');
+    wrap.setAttribute('aria-label','Language / ภาษา');
+    wrap.innerHTML = '<button type="button" data-lang="th">TH</button><button type="button" data-lang="en">EN</button>';
+    wrap.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-lang]');
+      if (btn) setLanguage(btn.dataset.lang);
+    });
+    heroBrand.appendChild(wrap);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    createSwitcher();
+    setLanguage(currentLang);
+
+    let pending = false;
+    const observer = new MutationObserver(mutations => {
+      if (pending) return;
+      const hasAdded = mutations.some(m => m.addedNodes && m.addedNodes.length);
+      if (!hasAdded) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        mutations.forEach(m => m.addedNodes.forEach(node => {
+          if (node.nodeType === Node.TEXT_NODE) translateTextNode(node, currentLang);
+          else if (node.nodeType === Node.ELEMENT_NODE) walkAndTranslate(node, currentLang);
+        }));
+        pending = false;
+      });
+    });
+    observer.observe(document.body, {childList:true, subtree:true});
+  });
+
+  window.setWarfarinLanguage = setLanguage;
+})();
+</script>
+
 </body>
 </html>
