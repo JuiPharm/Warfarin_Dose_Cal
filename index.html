@@ -34,6 +34,7 @@
         <div class="tab-nav">
           <button type="button" class="tab-btn active" data-tab="tab-calculator">💊 คำนวณและปรับยา</button>
           <button type="button" class="tab-btn" data-tab="tab-ttr">📈 TTR Analyzer (Rosendaal)</button>
+          <button type="button" class="tab-btn" data-tab="tab-protocols">📚 แนวทาง Vit K1 & เลือด</button>
           <button type="button" class="tab-btn" data-tab="tab-export">📋 เวชระเบียน EMR</button>
         </div>
 
@@ -132,8 +133,17 @@
                 <select id="bleedingStatus" class="form-select">
                   <option value="none">ไม่มีอาการเลือดออกผิดปกติ (No bleeding)</option>
                   <option value="minor">เลือดออกเล็กน้อย เช่น เลือดกำเดา/แปรงฟันแล้วเลือดออก (Minor bleeding)</option>
-                  <option value="major">เลือดออกรุนแรง / อาเจียนเป็นเลือด / ถ่ายดำ / ซีดฮวบ (Major bleeding - ฉุกเฉิน)</option>
+                  <option value="major">🚨 เลือดออกรุนแรง / อาเจียนเป็นเลือด / ถ่ายดำ / ซีดฮวบ (Major bleeding - ฉุกเฉิน)</option>
                 </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="highBleedingRisk">ความเสี่ยงเลือดออกสูง (High Bleeding Risk Factor)</label>
+                <select id="highBleedingRisk" class="form-select">
+                  <option value="false">ความเสี่ยงปกติ / ต่ำ (Low Risk: ไม่มีประวัติเลือดออก, อายุน้อย, ไตปกติ)</option>
+                  <option value="true">⚠️ ความเสี่ยงสูง (High Risk: อายุ ≥ 65 ปี, ประวัติ GI bleed, eGFR < 30, ใช้ NSAIDs/Antiplatelet ร่วม, HAS-BLED ≥ 3)</option>
+                </select>
+                <div class="help-text">ใช้สำหรับตัดสินใจให้ Oral Vitamin K1 กรณี INR 5.0 – 8.9 ที่ไม่มีเลือดออกรุนแรง</div>
               </div>
 
               <div class="form-group">
@@ -295,22 +305,107 @@
                 </div>
               </div>
 
-              <!-- Selected Regimen Weekly Matrix -->
+              <!-- Selected Regimen Schedule Views (Calendar / Split / Weekly) -->
               <div id="selectedRegimenDetails" style="display: none;">
-                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #1e293b;">
-                  📅 ตารางรับประทานยาประจำสัปดาห์ (Maintenance Weekly Schedule)
-                </h4>
-                <table class="schedule-table" id="weeklyScheduleTable">
-                  <thead>
-                    <tr>
-                      <th>วัน</th>
-                      <th>ขนาดยา (mg)</th>
-                      <th>เม็ดยาที่รับประทาน</th>
-                      <th>ภาพเม็ดยา</th>
-                    </tr>
-                  </thead>
-                  <tbody id="weeklyScheduleTbody"></tbody>
-                </table>
+                
+                <!-- View Switcher -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                  <h4 style="font-size: 0.95rem; color: #1e293b; font-weight: 700;">
+                    📅 ตารางการรับประทานยาตามวันจริง (Medication Schedule)
+                  </h4>
+                  <div class="calendar-view-switcher">
+                    <button type="button" class="cal-switch-btn active" data-view="calendar">📅 ปฏิทินรายเดือน (7 วัน)</button>
+                    <button type="button" class="cal-switch-btn" data-view="split">📋 ตารางแยกซองรายวัน</button>
+                    <button type="button" class="cal-switch-btn" data-view="weekly">🔄 ตารางรอบสัปดาห์</button>
+                  </div>
+                </div>
+
+                                <!-- Printable Patient Calendar Header (Visible only when printed) -->
+                <div class="print-patient-header" id="printPatientHeader">
+                  <div class="print-header-top">
+                    <div class="print-header-brand">
+                      <img src="assets/logo.jpg" alt="Logo" class="print-logo-img">
+                      <div>
+                        <h2 class="print-clinic-title">Warfarin Anticoagulation Clinic</h2>
+                        <div class="print-clinic-sub">ตารางการรับประทานยาวาร์ฟารินสำหรับผู้ป่วย (Patient Medication Calendar)</div>
+                      </div>
+                    </div>
+                    <div class="print-date-badge">
+                      วันที่สั่งยา: <strong id="printDateGenerated">-</strong>
+                    </div>
+                  </div>
+                  <div class="print-patient-meta-grid">
+                    <div class="print-meta-col">
+                      <div><strong>ชื่อ-นามสกุล:</strong> ___________________________________</div>
+                      <div style="margin-top: 5px;"><strong>ข้อบ่งใช้:</strong> <span id="printIndicationText">-</span></div>
+                    </div>
+                    <div class="print-meta-col">
+                      <div><strong>HN:</strong> ______________________</div>
+                      <div style="margin-top: 5px;"><strong>ช่วงเป้าหมาย (Target INR):</strong> <strong id="printTargetINRText" style="color:#0369a1;">2.0 – 3.0</strong></div>
+                    </div>
+                    <div class="print-meta-col">
+                      <div><strong>INR ครั้งนี้:</strong> <strong id="printCurrentINRText" style="color:#b45309;">-</strong></div>
+                      <div style="margin-top: 5px;"><strong>วันนัดตรวจครั้งถัดไป:</strong> <strong id="printNextApptText" style="color:#b91c1c;">-</strong></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- VIEW 1: 7-Column Medication Calendar Grid -->
+                <div id="medicationCalendarContainer">
+                  <div class="calendar-wrapper">
+                    <div class="calendar-weekday-bar">
+                      <div>วันจันทร์ (Mon)</div>
+                      <div>วันอังคาร (Tue)</div>
+                      <div>วันพุธ (Wed)</div>
+                      <div>วันพฤหัสบดี (Thu)</div>
+                      <div>วันศุกร์ (Fri)</div>
+                      <div>วันเสาร์ (Sat)</div>
+                      <div>วันอาทิตย์ (Sun)</div>
+                    </div>
+                    <div class="calendar-grid" id="medicationCalendarGrid"></div>
+                  </div>
+                </div>
+
+                <!-- VIEW 2: Split-packet Daily Schedule Table -->
+                <div id="splitScheduleContainer" style="display: none;">
+                  <div class="split-table-wrapper">
+                    <table class="split-table">
+                      <thead>
+                        <tr>
+                          <th>ลำดับ</th>
+                          <th>วันที่</th>
+                          <th>วันในสัปดาห์</th>
+                          <th>ขนาดยา</th>
+                          <th>ภาพเม็ดยา</th>
+                          <th style="text-align: left;">วิธีรับประทาน</th>
+                        </tr>
+                      </thead>
+                      <tbody id="splitScheduleTbody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- VIEW 3: Weekly 7-Day Matrix Table -->
+                <div id="weeklyScheduleContainer" style="display: none;">
+                  <table class="schedule-table" id="weeklyScheduleTable">
+                    <thead>
+                      <tr>
+                        <th>วัน</th>
+                        <th>ขนาดยา (mg)</th>
+                        <th>เม็ดยาที่รับประทาน</th>
+                        <th>ภาพเม็ดยา</th>
+                      </tr>
+                    </thead>
+                    <tbody id="weeklyScheduleTbody"></tbody>
+                  </table>
+                </div>
+
+                <!-- Patient Advice Instructions Banner -->
+                <div class="patient-advice-box">
+                  <strong>📌 คำแนะนำสำคัญสำหรับผู้ป่วย:</strong>
+                  รับประทานยาวันละ 1 ครั้ง ในเวลาเดียวกันทุกวัน (แนะนำช่วง 18.00 – 20.00 น.) | หากลืมรับประทานยา ให้รับประทานทันทีที่นึกได้ในวันนั้น <u>ห้ามเพิ่มขนาดยาเป็นสองเท่า</u> ในวันถัดไปโดยเด็ดขาด | หากมีอาการเลือดออกผิดปกติ เช่น เลือดกำเดาไหลไม่หยุด ถ่ายอุจจาระสีดำ หรือจ้ำเลือดขนาดใหญ่ผิดปกติ ให้มาพบแพทย์ทันที
+                </div>
+
               </div>
 
             </div>
@@ -403,6 +498,242 @@
             </div>
 
           </div>
+        </div>
+      </div>
+    </div>
+
+        <!-- TAB 4: CLINICAL PROTOCOLS & REFACTOR COMPARISON -->
+    <div class="tab-pane" id="tab-protocols">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <h3>📚 แนวทางการบริหารยา Vitamin K1 (Phytonadione) และ Blood Products</h3>
+          <span class="badge-rank" style="background: var(--primary); color: #fff;">CHEST & Thai Heart Guidelines</span>
+        </div>
+        <div class="card-body">
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+            ตารางเปรียบเทียบแนวทางปฏิบัติทางคลินิกเมื่อผู้ป่วยมีระดับ INR สูงเกินเป้าหมาย หรือมีภาวะเลือดออกผิดปกติ สำหรับบุคลากรทางการแพทย์และเภสัชกรคลินิก
+          </p>
+
+          <!-- Table 1.1: Clinical Decision Matrix -->
+          <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin-bottom: 0.75rem;">
+            🔹 ตารางที่ 1.1: Clinical Decision Matrix (จำแนกตามระดับ INR และภาวะเลือดออก)
+          </h4>
+          <div class="protocol-table-wrapper">
+            <table class="protocol-matrix-table">
+              <thead>
+                <tr>
+                  <th style="width: 22%;">สถานการณ์ทางคลินิก (Clinical Condition)</th>
+                  <th style="width: 14%;">การจัดการ Warfarin</th>
+                  <th style="width: 24%;">การบริหาร Vitamin K1 (Phytonadione)</th>
+                  <th style="width: 22%;">การให้สารทดแทน Blood Products</th>
+                  <th style="width: 18%;">การติดตามผล (Monitoring)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row-warning-low">
+                  <td>
+                    <strong>INR 5.0 – 8.9</strong><br>
+                    <span class="badge-sub">ไม่มีเลือดออก & เสี่ยงต่ำ</span>
+                  </td>
+                  <td><span class="action-tag tag-hold">งดยา 1–2 มื้อ</span></td>
+                  <td><span class="action-tag tag-none">ไม่ต้องให้</span><br><small style="color:var(--text-muted);">ป้องกันภาวะดื้อยา</small></td>
+                  <td><span class="action-tag tag-none">ไม่ต้องให้</span></td>
+                  <td>ติดตาม INR จนเข้าเป้าหมาย แล้วเริ่มยาใหม่โดยลด TWD ลง 10%–20%</td>
+                </tr>
+                <tr class="row-warning-high">
+                  <td>
+                    <strong>INR 5.0 – 8.9</strong><br>
+                    <span class="badge-sub danger">ไม่มีเลือดออก แต่เสี่ยงเลือดออกสูง</span>
+                  </td>
+                  <td><span class="action-tag tag-hold">งดยา 1–2 มื้อ</span></td>
+                  <td>
+                    <strong style="color: #b45309;">Oral Vitamin K1: 1.0 – 2.5 mg</strong><br>
+                    <span class="route-badge oral">รับประทาน 1 ครั้ง</span>
+                  </td>
+                  <td><span class="action-tag tag-none">ไม่ต้องให้</span></td>
+                  <td>ตรวจ INR ซ้ำใน 24–48 ชม. แล้วปรับลด TWD ลง 10%–20%</td>
+                </tr>
+                <tr class="row-danger">
+                  <td>
+                    <strong>INR ≥ 9.0</strong><br>
+                    <span class="badge-sub danger">ไม่มีเลือดออกรุนแรง (วิกฤต)</span>
+                  </td>
+                  <td><span class="action-tag tag-hold">งดยาชั่วคราว (1–2 วัน)</span></td>
+                  <td>
+                    <strong style="color: #dc2626;">Oral Vitamin K1: 2.5 – 5.0 mg</strong><br>
+                    <span class="route-badge oral">รับประทาน 1 ครั้ง</span>
+                  </td>
+                  <td><span class="action-tag tag-none">ไม่ต้องให้</span></td>
+                  <td>ตรวจ INR ซ้ำใน 24 ชม. หากยังสูงพิจารณาให้ oral Vit K1 ซ้ำ 1.0–2.0 mg</td>
+                </tr>
+                <tr class="row-critical">
+                  <td>
+                    <strong>Major / Life-Threatening Bleeding</strong><br>
+                    <span class="badge-sub critical">ระดับ INR ใดๆ (ฉุกเฉินสูงสุด)</span>
+                  </td>
+                  <td><span class="action-tag tag-critical">หยุดยาทันที</span></td>
+                  <td>
+                    <strong style="color: #991b1b;">IV Vitamin K1: 10 mg</strong><br>
+                    <span class="route-badge iv">Slow IV Infusion อย่างน้อย 30 นาที</span>
+                  </td>
+                  <td>
+                    <strong style="color: #1e3a8a;">4-Factor PCC (25–50 IU/kg)</strong><br>
+                    <small style="color:var(--text-muted);">หรือ FFP (15 mL/kg) หากไม่มี PCC</small>
+                  </td>
+                  <td>เจาะ INR ซ้ำใน 30 นาที (หลัง PCC) หรือติดตามทุก 12 ชม. ให้ Vit K1 ซ้ำได้ทุก 12 ชม.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Table 1.2: Pharmacology & Administration Rules -->
+          <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin: 1.75rem 0 0.75rem 0;">
+            🔹 ตารางที่ 1.2: คุณสมบัติทางเภสัชวิทยาและการบริหารยา (Pharmacology & Administration Rules)
+          </h4>
+          <div class="protocol-table-wrapper">
+            <table class="protocol-matrix-table">
+              <thead>
+                <tr>
+                  <th style="width: 22%;">ตัวยา / สารทดแทน</th>
+                  <th style="width: 22%;">เส้นทางการให้ยา (Route)</th>
+                  <th style="width: 18%;">ระยะเวลาออกฤทธิ์ (Onset / Peak)</th>
+                  <th style="width: 38%;">ข้อควรระวังและเงื่อนไขความปลอดภัย (Safety & Warnings)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Oral Vitamin K1 (Phytonadione)</strong></td>
+                  <td><span class="route-badge oral">รับประทาน (PO)</span></td>
+                  <td>Onset: 8–24 ชม.<br>Peak: 24 ชม.</td>
+                  <td>
+                    <span style="color: #166534; font-weight: 600;">✔ เป็นเส้นทางที่ปลอดภัยที่สุด</span><br>
+                    หลีกเลี่ยงการใช้ขนาดสูงเกินไปเพื่อป้องกันภาวะดื้อยาวาร์ฟาริน (Warfarin Resistance) เมื่อเริ่มยาใหม่
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>IV Vitamin K1 (Phytonadione)</strong></td>
+                  <td><span class="route-badge iv">หยดเข้าทางหลอดเลือดดำช้าๆ (Slow IV Infusion)</span></td>
+                  <td>Onset: 6–8 ชม.<br>Peak: 12–24 ชม.</td>
+                  <td>
+                    <span style="color: #b45309; font-weight: 600;">⚠️ ต้องผสมสารน้ำหยดช้าๆ อย่างน้อย 30 นาที</span> เพื่อป้องกันปฏิกิริยาแพ้รุนแรง (Anaphylaxis/Hypotension)<br>
+                    <span style="color: #dc2626; font-weight: 700;">❌ ห้ามฉีด IM หรือ SC เด็ดขาด</span> เนื่องจากดูดซึมไม่แน่นอนและเสี่ยงต่อการเกิดก้อนเลือดอุดกั้น (Hematoma)
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>4-Factor PCC (Prothrombin Complex Concentrate)</strong></td>
+                  <td><span class="product-badge pcc">IV Direct / Infusion</span></td>
+                  <td>Onset: ทันที (15–30 นาที)<br>Peak: ทันที</td>
+                  <td>
+                    <span style="color: #1e40af; font-weight: 600;">🌟 เป็น First-line Agent ในการแก้ไขภาวะเลือดออกวิกฤต</span><br>
+                    เนื่องจากมีปริมาณ Clotting Factors II, VII, IX, X เข้มข้น และใช้ปริมาตรสารน้ำน้อย
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>FFP (Fresh Frozen Plasma)</strong></td>
+                  <td><span class="product-badge ffp">IV Infusion</span></td>
+                  <td>Onset: ช้ากว่า PCC (ต้องใช้เวลาละลายและให้ปริมาตรมาก)</td>
+                  <td>
+                    <span style="color: #64748b; font-weight: 600;">ใช้เป็น Second-line เมื่อไม่มี PCC</span><br>
+                    ขนาดบริหารมาตรฐาน 15 mL/kg หรือ 2–4 units | <span style="color: #dc2626;">ระวังภาวะน้ำเกิน (Fluid Overload)</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Section 3: Web Application Rule Engine (JSON Logic) -->
+          <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin: 1.75rem 0 0.75rem 0;">
+            🔹 โครงสร้างเงื่อนไขสำหรับประมวลผล (Web Application Rules / JSON Logic)
+          </h4>
+          <div class="code-box">
+            <pre><code>{
+  "rules": [
+    {
+      "condition": "bleeding_status == 'MAJOR_BLEEDING'",
+      "action": {
+        "hold_warfarin": true,
+        "vitamin_k": { "dose_mg": 10, "route": "SLOW_IV_INFUSION", "duration_min": 30 },
+        "blood_product": { "primary": "4_FACTOR_PCC", "dose_units_per_kg": "25-50", "alternative": "FFP_15_ML_KG" },
+        "recheck_inr_hours": 0.5
+      }
+    },
+    {
+      "condition": "bleeding_status == 'NONE' && inr >= 9.0",
+      "action": {
+        "hold_warfarin": true,
+        "vitamin_k": { "dose_mg": 2.5, "route": "ORAL", "max_dose_mg": 5.0 },
+        "blood_product": null,
+        "recheck_inr_hours": 24
+      }
+    },
+    {
+      "condition": "bleeding_status == 'NONE' && inr >= 5.0 && inr < 9.0 && high_bleeding_risk == true",
+      "action": {
+        "hold_warfarin_doses": "1-2",
+        "vitamin_k": { "dose_mg": 1.0, "route": "ORAL", "max_dose_mg": 2.5 },
+        "blood_product": null,
+        "recheck_inr_hours": 24
+      }
+    }
+  ]
+}</code></pre>
+          </div>
+
+          <!-- Section 4: Key Improvements Table -->
+          <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin: 1.75rem 0 0.75rem 0;">
+            🔹 2. สรุปข้อปรับปรุงของ Code เดิม (Key Improvements & Refactor)
+          </h4>
+          <div class="protocol-table-wrapper">
+            <table class="protocol-matrix-table refactor-table">
+              <thead>
+                <tr>
+                  <th style="width: 22%;">ประเด็นตรรกะ (Logic Domain)</th>
+                  <th style="width: 25%;">โค้ดเดิม (Legacy Flawed Code)</th>
+                  <th style="width: 25%;">โค้ดระบบใหม่ (Refactored Logic)</th>
+                  <th style="width: 28%;">ผลลัพธ์ทางคลินิก (Clinical Impact)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>การคำนวณขนาดยาประจำสัปดาห์ (TWD Calculation)</strong></td>
+                  <td class="legacy-col">นำขนาดยาที่สั่งหยุดชั่วคราว (Hold dose เช่น 5 mg) ไปลบออกจาก Total Weekly Dose (TWD) ถาวร</td>
+                  <td class="refactored-col">แยกสัปดาห์แรก (Acute Transition) ออกจากสัปดาห์ถัดไป (Maintenance Regimen) อย่างเด็ดขาด</td>
+                  <td>
+                    <span class="badge-impact critical">ป้องกัน Permanent Underdosing</span><br>
+                    ลดความเสี่ยงต่อการเกิดลิ่มเลือดอุดตันซ้ำ (Thromboembolism / Ischemic Stroke)
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>การคำนวณ TTR (Rosendaal Interpolation)</strong></td>
+                  <td class="legacy-col">คำนวณแบบ Simple Percentage (PINRR) หรือประมวลผลช่วงวันที่นัดเจาะผิดพลาดเมื่อวันนัดไม่สม่ำเสมอ</td>
+                  <td class="refactored-col">ใช้ Linear Interpolation ตามวิธี Rosendaal Method คำนวณตามจำนวนวันจริง (Person-Time)</td>
+                  <td>
+                    <span class="badge-impact success">มาตรฐานสากล Gold Standard</span><br>
+                    ได้ค่า TTR ที่สะท้อนคุณภาพการควบคุมระดับยาที่แท้จริงตามเกณฑ์มาตรฐาน (Target TTR ≥ 65% – 70%)
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>การจัดการภาวะ INR สูงวิกฤต (High INR Crisis)</strong></td>
+                  <td class="legacy-col">คำนวณเฉพาะการลดขนาดยา โดยไม่ได้ประเมินภาวะ Bleeding และปัจจัยเสี่ยงร่วม</td>
+                  <td class="refactored-col">ประมวลผล Rule-Based Engine ครอบคลุมทั้ง INR, Bleeding Severity, High Risk Factors และชนิดลิ้นหัวใจ</td>
+                  <td>
+                    <span class="badge-impact warning">ความปลอดภัยสูงสุด</span><br>
+                    แนะนำการสั่งใช้อย่างถูกต้อง ทั้งชนิดขนาดยา (Oral/IV Vitamin K1) และสารทดแทน Blood Products
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>การจัดตารางเม็ดยา (Tablet Fractional Allocation)</strong></td>
+                  <td class="legacy-col">กระจายเม็ดยาโดยอาจเกิดเศษยารายวันที่ไม่สามารถหักเม็ดได้จริง</td>
+                  <td class="refactored-col">คำนวณจับคู่ความแรงเม็ดยาที่มีจริง (2, 3, 5 mg) พร้อมรองรับการหักครึ่งเม็ด (0.5 เม็ด) และเกลี่ยขนาดยาลงตารางรายวันสม่ำเสมอ</td>
+                  <td>
+                    <span class="badge-impact success">ลด Medication Error</span><br>
+                    ผู้ป่วยทานยาง่าย ไม่สับสน เพิ่มความร่วมมือในการรับประทานยา (Adherence)
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
         </div>
       </div>
     </div>
